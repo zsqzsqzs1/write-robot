@@ -12,10 +12,11 @@
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
-from .geometry import Point, Polyline, bbox_union, strokes_bbox
+from .geometry import Point, Polyline, bbox_union, rotate, strokes_bbox
 from .glyphs import Glyph, GlyphRepository
 
 __all__ = ["TextLayout", "LayoutOptions", "PlacedGlyph"]
@@ -31,8 +32,8 @@ class LayoutOptions:
     #: 行距系数（相对于字号）
     line_height: float = 1.6
 
-    #: 字间距（相对字号的额外间隙比例）
-    letter_spacing: float = 0.05
+    #: 字间距（相对字号的额外间隙比例）。手写比印刷排版更松散。
+    letter_spacing: float = 0.10
 
     #: 书写区域尺寸 (mm)
     paper_width: float = 200.0
@@ -58,6 +59,27 @@ class LayoutOptions:
 
     #: 自动缩放的最小字号 (mm)
     min_font_size: float = 2.0
+
+    #: ---- 手写风格 ----
+    #: 是否启用手写风格扰动。机械写字机器人写出来的字总是完美对齐，
+    #: 开启后加入轻微的旋转、位置抖动、基线起伏和字距不均，更像手写笔记。
+    handwriting: bool = True
+
+    #: 每个字符的最大随机旋转角度（度）
+    hw_rotation: float = 2.6
+
+    #: 每个字符的最大位置抖动 (mm)
+    hw_offset: float = 0.9
+
+    #: 字距抖动比例（相对字距的随机浮动幅度）
+    hw_spacing_jitter: float = 0.35
+
+    #: 基线起伏幅度 (mm)
+    hw_baseline_wobble: float = 1.1
+
+    #: 随机种子。固定种子保证同样的输入永远得到同样的结果 ——
+    #: 写字机器人需要可复现的输出。
+    hw_seed: int = 20260101
 
 
 @dataclass
@@ -226,28 +248,53 @@ def _layout_pass(
         baseline = start_y - line_index * line_heights
 
         cursor = x
-        for ch in line:
+        for char_index, ch in enumerate(line):
             glyph = repository.get(ch)
             if glyph is None:
                 missing.append(ch)
                 cursor += advance_of_units(ch, repository) * font_size
                 continue
 
+            # ---- 手写风格扰动 ----
+            angle = 0.0
+            dx = 0.0
+            dy = 0.0
+            extra_gap = 0.0
+            if options.handwriting:
+                rng = random.Random(f"{options.hw_seed}:{line_index}:{char_index}")
+                angle = rng.uniform(-options.hw_rotation, options.hw_rotation)
+                dx = rng.uniform(-options.hw_offset, options.hw_offset)
+                # 基线缓慢起伏：沿行方向的正弦波 + 每字一点随机
+                # 基线起伏：沿行方向的正弦波，波长约 50mm，
+                # 让相邻字有可见的高低起伏，而不是整行缓慢倾斜
+                wobble = options.hw_baseline_wobble * math.sin(
+                    cursor * 0.126 + line_index * 1.7
+                )
+                dy = wobble + rng.uniform(-options.hw_offset, options.hw_offset) * 0.8
+                extra_gap = options.letter_spacing * font_size * rng.uniform(
+                    -options.hw_spacing_jitter, options.hw_spacing_jitter
+                )
+
+            char_x = cursor + dx
+            char_y = baseline + dy
+
             strokes: List[Polyline] = []
             for stroke in glyph.strokes:
-                moved = [(cursor + px * font_size, baseline + py * font_size) for px, py in stroke]
+                moved = [(char_x + px * font_size, char_y + py * font_size) for px, py in stroke]
+                if angle:
+                    moved = rotate(moved, angle, origin=(char_x, char_y))
                 strokes.append(moved)
 
             placed.append(
                 PlacedGlyph(
                     char=ch,
                     strokes=strokes,
-                    origin=(cursor, baseline),
+                    origin=(char_x, char_y),
                     advance=glyph.advance * font_size,
                     line=line_index,
                 )
             )
-            cursor += glyph.advance * font_size + options.letter_spacing * font_size
+            cursor += glyph.advance * font_size + options.letter_spacing * font_size + extra_gap
 
     return placed, missing
 

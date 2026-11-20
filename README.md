@@ -35,7 +35,7 @@
 | **CoreXY 支持** | 固件解算与上位机解算两种路径都支持，公式与 GRBL `planner.c` 中的 `COREXY` 分支一致 |
 | **抬落笔可配** | Z 轴升降（`G0 Z`）或 RC 舵机（`M3 S`），对应 `grbl-servo` 固件的 PWM 语义 |
 | **纯 Python** | 核心功能零依赖；只有串口下发需要 `pyserial` |
-| **可复现** | 66 项单元测试覆盖几何、排版、表格、轨迹、G-code 与模拟器 |
+| **可复现** | 71 项单元测试覆盖几何、排版、手写风格、表格、轨迹、G-code 与模拟器 |
 
 ---
 
@@ -93,6 +93,34 @@ machine = MachineConfig(kinematics="corexy", width=200, height=200)
 job = build_job(WriteRequest(text="你好世界", machine=machine))
 open("preview.html", "w", encoding="utf-8").write(render_preview(job))
 ```
+
+### 手写风格
+
+写字机器人写出来的字原本是完美对齐的 —— 像打印出来的表单，不像手写笔记。
+开启手写风格后会加入四层扰动：
+
+| 效果 | 参数 | 默认 |
+|---|---|---|
+| 每字轻微旋转 | `--hw-rotation` | 2.6° |
+| 每字位置抖动 | `--hw-offset` | 0.9 mm |
+| 基线起伏（沿行方向的正弦波） | `--hw-wobble` | 1.1 mm |
+| 字距随机浮动 | `--hw-spacing-jitter` | 35% |
+| 笔画运笔起伏（笔画不再绝对笔直） | `--stroke-wobble` | 0（按需开启） |
+| 表格线手绘感 | `--border-wobble` | 0（按需开启） |
+| 模拟笔压的线宽轻重 | 预览层自动 | ±14% |
+
+```bash
+writerobot table --file rows.json -o out/table.html --stroke-wobble 0.25 --border-wobble 0.35
+```
+
+想要严格对齐的印刷体：
+
+```bash
+writerobot table --file rows.json -o out/table.html --no-handwriting
+```
+
+> 所有扰动都由固定随机种子驱动（`--hw-seed`），**同样的输入永远得到同样的
+> 输出** —— 写字机器人需要可复现的书写结果。
 
 ### 写表格
 
@@ -400,7 +428,7 @@ write-robot/
 │   ├── pipeline.py     高层流水线
 │   └── cli.py          命令行入口
 ├── wr.bat              Windows 一键启动脚本
-├── tests/              66 项单元测试
+├── tests/              71 项单元测试
 ├── examples/           示例配置与示例脚本
 └── docs/
 ```

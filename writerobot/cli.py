@@ -42,12 +42,18 @@ def _add_layout_args(parser: argparse.ArgumentParser) -> None:
     g = parser.add_argument_group("排版")
     g.add_argument("--font-size", type=float, default=20.0, help="字号（em 盒高度，mm）")
     g.add_argument("--line-height", type=float, default=1.6, help="行距系数")
-    g.add_argument("--letter-spacing", type=float, default=0.05, help="字间距比例")
+    g.add_argument("--letter-spacing", type=float, default=0.10, help="字间距比例")
     g.add_argument("--margin", type=float, default=10.0, help="四周留边（mm）")
     g.add_argument("--align", choices=("left", "center", "right"), default="left", help="水平对齐")
     g.add_argument("--valign", choices=("top", "center", "bottom"), default="top", help="垂直对齐")
     g.add_argument("--wrap", type=float, default=None, help="自动换行宽度（mm）")
     g.add_argument("--no-auto-fit", action="store_true", help="不自动缩小字号以适应区域")
+    g.add_argument("--no-handwriting", action="store_true", help="关闭手写风格（字符严格对齐）")
+    g.add_argument("--hw-rotation", type=float, default=2.6, help="单字最大随机旋转角度（度）")
+    g.add_argument("--hw-offset", type=float, default=0.9, help="单字最大位置抖动（mm）")
+    g.add_argument("--hw-wobble", type=float, default=1.1, help="基线起伏幅度（mm）")
+    g.add_argument("--hw-spacing-jitter", type=float, default=0.35, help="字距随机浮动比例")
+    g.add_argument("--hw-seed", type=int, default=20260101, help="手写风格随机种子（保证可复现）")
 
 
 def _add_machine_args(parser: argparse.ArgumentParser) -> None:
@@ -118,6 +124,12 @@ def _layout_from_args(args: argparse.Namespace, machine: MachineConfig) -> Layou
         valign=args.valign,
         wrap_width=args.wrap,
         auto_fit=not args.no_auto_fit,
+        handwriting=not getattr(args, "no_handwriting", False),
+        hw_rotation=getattr(args, "hw_rotation", 2.6),
+        hw_offset=getattr(args, "hw_offset", 0.9),
+        hw_baseline_wobble=getattr(args, "hw_wobble", 1.1),
+        hw_spacing_jitter=getattr(args, "hw_spacing_jitter", 0.35),
+        hw_seed=getattr(args, "hw_seed", 20260101),
     )
 
 
@@ -129,6 +141,7 @@ def _build_request(args: argparse.Namespace, machine: MachineConfig) -> WriteReq
         corner_radius=getattr(args, "corner_radius", 0.6),
         sample_step=getattr(args, "sample_step", 0.5),
         smooth=not getattr(args, "no_smooth", False),
+        stroke_wobble=getattr(args, "stroke_wobble", 0.0),
         cache_dir=Path(args.cache_dir) if getattr(args, "cache_dir", None) else None,
         offline=getattr(args, "offline", False),
         line_numbers=getattr(args, "line_numbers", False),
@@ -299,6 +312,7 @@ def cmd_table(args: argparse.Namespace) -> int:
         align=args.align,
         valign=args.valign,
         draw_borders=not args.no_borders,
+        border_wobble=args.border_wobble,
     )
 
     job = build_table_job(
@@ -312,6 +326,13 @@ def cmd_table(args: argparse.Namespace) -> int:
         corner_radius=args.corner_radius,
         sample_step=args.sample_step,
         smooth=not args.no_smooth,
+        stroke_wobble=args.stroke_wobble,
+        handwriting=not args.no_handwriting,
+        hw_rotation=args.hw_rotation,
+        hw_offset=args.hw_offset,
+        hw_baseline_wobble=args.hw_wobble,
+        hw_spacing_jitter=args.hw_spacing_jitter,
+        hw_seed=args.hw_seed,
     )
 
     sim_options = SimulationOptions(
@@ -533,9 +554,12 @@ def _add_preview_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_job_args(parser: argparse.ArgumentParser) -> None:
     """gcode / run 专用参数。menu 也要带上。"""
-    parser.add_argument("--corner-radius", type=float, default=0.6, help="拐角圆滑半径（mm）")
+    parser.add_argument("--corner-radius", type=float, default=1.1, help="拐角圆滑半径（mm）")
     parser.add_argument("--sample-step", type=float, default=0.5, help="弧长重采样步长（mm）")
     parser.add_argument("--no-smooth", action="store_true", help="不做样条平滑")
+    parser.add_argument(
+        "--stroke-wobble", type=float, default=0.0, help="笔画运笔起伏幅度（mm），0=绝对直线"
+    )
     parser.add_argument("--line-numbers", action="store_true", help="G-code 带行号")
     parser.add_argument("--cache-dir", default=None, help="汉字数据缓存目录")
     parser.add_argument("--offline", action="store_true", help="离线模式，只用本地缓存")
@@ -558,6 +582,7 @@ def build_parser() -> argparse.ArgumentParser:
     tb.add_argument("--format", choices=("html", "svg"), default="html", help="输出格式")
     tb.add_argument("--padding", type=float, default=3.0, help="单元格内边距（mm）")
     tb.add_argument("--no-borders", action="store_true", help="不绘制表格线")
+    tb.add_argument("--border-wobble", type=float, default=0.0, help="表格线手绘起伏幅度（mm）")
     tb.add_argument("--animate", action="store_true", help="打开页面从空白开始播放动画（默认直接显示结果）")
     tb.add_argument("--demo", action="store_true", help="演示模式（加速播放）")
     tb.add_argument("--speed", type=float, default=4.0, help="演示速度倍率")
@@ -565,9 +590,10 @@ def build_parser() -> argparse.ArgumentParser:
     tb.add_argument("--stroke-numbers", action="store_true", help="显示笔顺编号（默认不显示）")
     tb.add_argument("--canvas-width", type=int, default=800, help="画布宽度（像素）")
     tb.add_argument("--open", action="store_true", help="生成后用浏览器打开预览")
-    tb.add_argument("--corner-radius", type=float, default=0.6, help="拐角圆滑半径（mm）")
+    tb.add_argument("--corner-radius", type=float, default=1.1, help="拐角圆滑半径（mm）")
     tb.add_argument("--sample-step", type=float, default=0.5, help="弧长重采样步长（mm）")
     tb.add_argument("--no-smooth", action="store_true", help="不做样条平滑")
+    tb.add_argument("--stroke-wobble", type=float, default=0.0, help="笔画运笔起伏幅度（mm）")
     tb.add_argument("--cache-dir", default=None, help="汉字数据缓存目录")
     tb.add_argument("--offline", action="store_true", help="离线模式，只用本地缓存")
     _add_layout_args(tb)
@@ -598,9 +624,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-stroke-numbers", action="store_true", help="不显示笔顺编号")
     p.add_argument("--canvas-width", type=int, default=800, help="画布宽度（像素）")
     p.add_argument("--open", action="store_true", help="生成后用浏览器打开预览")
-    p.add_argument("--corner-radius", type=float, default=0.6, help="拐角圆滑半径（mm）")
-    p.add_argument("--cache-dir", default=None, help="汉字数据缓存目录")
-    p.add_argument("--offline", action="store_true", help="离线模式，只用本地缓存")
+    _add_job_args(p)
     _add_layout_args(p)
     _add_machine_args(p)
     p.set_defaults(func=cmd_preview)

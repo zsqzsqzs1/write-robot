@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
@@ -42,6 +44,10 @@ class TableSpec:
 
     #: 是否绘制表格线
     draw_borders: bool = True
+
+    #: 表格线的轻微手绘起伏幅度 (mm)。0 表示画规整直线。
+    #: 手写笔记里的表格线也是手画的，不会绝对笔直。
+    border_wobble: float = 0.0
 
     def validate(self) -> None:
         if not self.rows:
@@ -122,6 +128,12 @@ def layout_table(
     line_height: float = 1.4,
     letter_spacing: float = 0.05,
     min_font_size: float = 3.0,
+    handwriting: bool = True,
+    hw_rotation: float = 2.6,
+    hw_offset: float = 0.9,
+    hw_baseline_wobble: float = 1.1,
+    hw_spacing_jitter: float = 0.35,
+    hw_seed: int = 20260101,
 ) -> TableLayout:
     """把表格排到纸张上。
 
@@ -179,7 +191,7 @@ def layout_table(
     # ---- 表格线 ----
     if spec.draw_borders:
         layout.borders = _build_borders(
-            x0, y0, x0 + total_w, y1, col_widths, row_heights
+            x0, y0, x0 + total_w, y1, col_widths, row_heights, spec.border_wobble
         )
 
     # ---- 单元格文字 ----
@@ -216,6 +228,12 @@ def layout_table(
                 valign=spec.valign,
                 auto_fit=True,
                 min_font_size=min_font_size,
+                handwriting=handwriting,
+                hw_rotation=hw_rotation,
+                hw_offset=hw_offset,
+                hw_baseline_wobble=hw_baseline_wobble,
+                hw_spacing_jitter=hw_spacing_jitter,
+                hw_seed=hw_seed,
             )
             cell_layout = layout_text(cell_text, repository, options)
 
@@ -264,8 +282,12 @@ def _build_borders(
     y1: float,
     col_widths: Sequence[float],
     row_heights: Sequence[float],
+    wobble: float = 0.0,
 ) -> List[Polyline]:
-    """生成表格线：外框 + 内部横线 + 内部竖线。"""
+    """生成表格线：外框 + 内部横线 + 内部竖线。
+
+    ``wobble`` 大于 0 时给线条加上轻微的起伏，模拟手绘表格线。
+    """
     lines: List[Polyline] = []
 
     # 外框（一条闭合路径，笔尖不用抬笔就能画完一圈）
@@ -283,4 +305,32 @@ def _build_borders(
         edge -= h
         lines.append([(x0, edge), (x1, edge)])
 
+    if wobble > 0:
+        lines = [_wobble_line(line, wobble) for line in lines]
+
     return lines
+
+
+def _wobble_line(line: Polyline, amplitude: float) -> Polyline:
+    """给一条直线加上低频起伏与端点微偏，模拟手绘。"""
+    if len(line) < 2 or amplitude <= 0:
+        return line
+
+    # 沿直线方向采样若干点，每个点做垂直方向的随机偏移
+    start, end = line[0], line[-1]
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length = math.hypot(dx, dy)
+    if length < 1e-9:
+        return line
+    nx, ny = -dy / length, dx / length  # 单位法向量
+
+    steps = max(6, int(length / 12))
+    out: Polyline = []
+    for i in range(steps + 1):
+        t = i / steps
+        # 两个不同频率的正弦叠加，保证首尾回到原位
+        offset = amplitude * (
+            math.sin(t * math.pi * 2.1) * 0.6 + math.sin(t * math.pi * 4.7) * 0.4
+        )
+        out.append((start[0] + dx * t + nx * offset, start[1] + dy * t + ny * offset))
+    return out

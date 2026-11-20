@@ -101,7 +101,7 @@ class TestLayout(unittest.TestCase):
         self.repo = GlyphRepository([FakeHanziProvider()])
 
     def test_single_line_layout(self):
-        opts = LayoutOptions(font_size=10, paper_width=100, paper_height=100)
+        opts = LayoutOptions(font_size=10, paper_width=100, paper_height=100, handwriting=False)
         layout = layout_text("AB", self.repo, opts)
         self.assertEqual(len(layout.glyphs), 2)
         self.assertAlmostEqual(layout.font_size, 10.0)
@@ -112,13 +112,22 @@ class TestLayout(unittest.TestCase):
         self.assertEqual({g.line for g in layout.glyphs}, {0, 1})
 
     def test_centering_offsets_content(self):
-        opts = LayoutOptions(font_size=10, paper_width=100, paper_height=100, align="center")
+        opts = LayoutOptions(
+            font_size=10, paper_width=100, paper_height=100, align="center", handwriting=False
+        )
         layout = layout_text("A", self.repo, opts)
         # 单字宽度 1em = 10mm，居中后左边界约在 (100-10)/2 = 45
         self.assertAlmostEqual(layout.glyphs[0].origin[0], 45.0, places=5)
 
     def test_right_alignment(self):
-        opts = LayoutOptions(font_size=10, paper_width=100, paper_height=100, align="right", margin_right=0)
+        opts = LayoutOptions(
+            font_size=10,
+            paper_width=100,
+            paper_height=100,
+            align="right",
+            margin_right=0,
+            handwriting=False,
+        )
         layout = layout_text("A", self.repo, opts)
         self.assertAlmostEqual(layout.glyphs[0].origin[0], 90.0, places=5)
 
@@ -176,6 +185,79 @@ class TestTrajectory(unittest.TestCase):
     def test_empty_strokes_are_skipped(self):
         traj = plan_trajectory([("A", 1, [])])
         self.assertEqual(len(traj.actions), 0)
+
+
+class TestHandwritingStyle(unittest.TestCase):
+    """手写风格扰动的回归测试。"""
+
+    def setUp(self):
+        self.repo = GlyphRepository([FakeHanziProvider()])
+
+    def test_handwriting_perturbs_characters(self):
+        clean = layout_text(
+            "ABCD",
+            self.repo,
+            LayoutOptions(font_size=10, paper_width=200, paper_height=100, handwriting=False),
+        )
+        hand = layout_text(
+            "ABCD",
+            self.repo,
+            LayoutOptions(font_size=10, paper_width=200, paper_height=100, handwriting=True),
+        )
+        clean_y = [g.origin[1] for g in clean.glyphs]
+        hand_y = [g.origin[1] for g in hand.glyphs]
+        self.assertNotEqual(clean_y, hand_y, "开启手写风格后字形基线应当变化")
+
+    def test_handwriting_is_deterministic(self):
+        """同样的输入必须得到同样的结果 —— 写字机器人需要可复现输出。"""
+        opts = LayoutOptions(font_size=10, paper_width=200, paper_height=100, handwriting=True)
+        a = layout_text("ABCDEF", self.repo, opts)
+        b = layout_text("ABCDEF", self.repo, opts)
+        self.assertEqual([g.origin for g in a.glyphs], [g.origin for g in b.glyphs])
+
+    def test_different_seeds_differ(self):
+        a = layout_text(
+            "ABCDEF",
+            self.repo,
+            LayoutOptions(font_size=10, paper_width=200, paper_height=100, handwriting=True, hw_seed=1),
+        )
+        b = layout_text(
+            "ABCDEF",
+            self.repo,
+            LayoutOptions(font_size=10, paper_width=200, paper_height=100, handwriting=True, hw_seed=2),
+        )
+        self.assertNotEqual([g.origin for g in a.glyphs], [g.origin for g in b.glyphs])
+
+    def test_handwriting_jitter_is_bounded(self):
+        """扰动幅度必须可控，否则会撑破单元格。"""
+        clean = layout_text(
+            "ABCDEF",
+            self.repo,
+            LayoutOptions(font_size=10, paper_width=200, paper_height=100, handwriting=False),
+        )
+        hand = layout_text(
+            "ABCDEF",
+            self.repo,
+            LayoutOptions(
+                font_size=10,
+                paper_width=200,
+                paper_height=100,
+                handwriting=True,
+                hw_offset=0.7,
+                hw_rotation=1.8,
+                hw_baseline_wobble=0.9,
+            ),
+        )
+        for cg, hg in zip(clean.glyphs, hand.glyphs):
+            self.assertLess(abs(cg.origin[0] - hg.origin[0]), 2.0)
+            self.assertLess(abs(cg.origin[1] - hg.origin[1]), 2.5)
+
+    def test_handwriting_keeps_characters_readable(self):
+        """旋转不能大到让字认不出来。"""
+        opts = LayoutOptions(font_size=20, paper_width=200, paper_height=100, handwriting=True)
+        layout = layout_text("ABCDEFGH", self.repo, opts)
+        for g in layout.glyphs:
+            self.assertTrue(g.strokes)
 
 
 if __name__ == "__main__":

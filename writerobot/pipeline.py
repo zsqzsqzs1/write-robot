@@ -32,13 +32,16 @@ class WriteRequest:
     layout: LayoutOptions = field(default_factory=LayoutOptions)
 
     #: 笔画内部拐角的圆滑半径 (mm)，0 表示保留尖角
-    corner_radius: float = 0.6
+    corner_radius: float = 1.1
 
     #: 弧长重采样步长 (mm)
     sample_step: float = 0.5
 
     #: 是否对笔画做样条平滑
     smooth: bool = True
+
+    #: 笔画运笔起伏幅度 (mm)，0 表示笔画走绝对直线
+    stroke_wobble: float = 0.0
 
     #: 汉字数据缓存目录
     cache_dir: Optional[Path] = None
@@ -101,6 +104,7 @@ def build_job(request: WriteRequest) -> WriteJob:
         corner_radius=request.corner_radius,
         sample_step=request.sample_step,
         smooth=request.smooth,
+        stroke_wobble=request.stroke_wobble,
     )
 
     generator = GCodeGenerator(request.machine, line_numbers=request.line_numbers)
@@ -124,9 +128,16 @@ def build_table_job(
     margin: float = 10.0,
     line_height: float = 1.4,
     letter_spacing: float = 0.05,
-    corner_radius: float = 0.6,
+    corner_radius: float = 1.1,
     sample_step: float = 0.5,
     smooth: bool = True,
+    stroke_wobble: float = 0.0,
+    handwriting: bool = True,
+    hw_rotation: float = 2.6,
+    hw_offset: float = 0.9,
+    hw_baseline_wobble: float = 1.1,
+    hw_spacing_jitter: float = 0.35,
+    hw_seed: int = 20260101,
 ) -> WriteJob:
     """把一个表格排版并转换成轨迹与 G-code。"""
     from .table import layout_table
@@ -140,6 +151,12 @@ def build_table_job(
         margin=margin,
         line_height=line_height,
         letter_spacing=letter_spacing,
+        handwriting=handwriting,
+        hw_rotation=hw_rotation,
+        hw_offset=hw_offset,
+        hw_baseline_wobble=hw_baseline_wobble,
+        hw_spacing_jitter=hw_spacing_jitter,
+        hw_seed=hw_seed,
     )
 
     strokes = table_layout.text_strokes
@@ -149,6 +166,7 @@ def build_table_job(
         corner_radius=corner_radius,
         sample_step=sample_step,
         smooth=smooth,
+        stroke_wobble=stroke_wobble,
     )
 
     generator = GCodeGenerator(machine)

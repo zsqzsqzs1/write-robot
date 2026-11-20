@@ -27,6 +27,7 @@ __all__ = [
     "bbox",
     "bbox_union",
     "strokes_bbox",
+    "rotate",
     "fit_to_box",
 ]
 
@@ -190,6 +191,24 @@ def transform(
     out: Polyline = []
     for x, y in points:
         out.append((x * scale * sx + offset[0], y * scale * sy + offset[1]))
+    return out
+
+
+def rotate(
+    points: Sequence[Point],
+    angle_deg: float,
+    origin: Point = (0.0, 0.0),
+) -> Polyline:
+    """绕 ``origin`` 旋转指定角度（逆时针为正）。"""
+    if not points:
+        return []
+    rad = math.radians(angle_deg)
+    ca, sa = math.cos(rad), math.sin(rad)
+    ox, oy = origin
+    out: Polyline = []
+    for x, y in points:
+        dx, dy = x - ox, y - oy
+        out.append((ox + dx * ca - dy * sa, oy + dx * sa + dy * ca))
     return out
 
 

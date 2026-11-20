@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
@@ -142,15 +143,63 @@ def _round_corners(
     return cleaned
 
 
+def _wobble_stroke(
+    points: Sequence[Point],
+    amplitude: float,
+    phase: float,
+    wavelength: float = 22.0,
+) -> Polyline:
+    """给笔画加轻微的运笔起伏。
+
+    手写时笔尖很少走绝对直线，总有细微的晃动。加入低幅度的
+    垂直偏移后，笔画看起来是「写」出来的，而不是「画」出来的。
+    """
+    if len(points) < 2 or amplitude <= 0:
+        return list(points)
+
+    total = polyline_length(points)
+    if total < 1e-6:
+        return list(points)
+
+    # 按弧长重新采样，保证起伏沿笔画的分布是均匀的
+    sampled = resample(points, max(0.6, wavelength / 6))
+    if len(sampled) < 2:
+        return list(points)
+
+    out: Polyline = []
+    travelled = 0.0
+    for i, pt in enumerate(sampled):
+        if i > 0:
+            travelled += math.dist(sampled[i - 1], pt)
+        # 该点的法向量
+        if i == 0:
+            dx, dy = sampled[1][0] - pt[0], sampled[1][1] - pt[1]
+        elif i == len(sampled) - 1:
+            dx, dy = pt[0] - sampled[i - 1][0], pt[1] - sampled[i - 1][1]
+        else:
+            dx = sampled[i + 1][0] - sampled[i - 1][0]
+            dy = sampled[i + 1][1] - sampled[i - 1][1]
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            out.append(pt)
+            continue
+        nx, ny = -dy / length, dx / length
+        offset = amplitude * math.sin(travelled / wavelength * 2 * math.pi + phase)
+        out.append((pt[0] + nx * offset, pt[1] + ny * offset))
+    return out
+
+
 def plan_trajectory(
     strokes: Sequence[Tuple[str, int, Polyline]],
     *,
     geometry: Optional[Sequence[Polyline]] = None,
-    corner_radius: float = 0.6,
+    corner_radius: float = 1.1,
     sample_step: float = 0.5,
     smooth: bool = True,
     simplify_tolerance: float = 0.01,
     min_travel: float = 0.05,
+    stroke_wobble: float = 0.0,
+    wobble_seed: int = 4242,
 ) -> Trajectory:
     """规划轨迹。
 
@@ -170,6 +219,9 @@ def plan_trajectory(
         是否对笔画做样条平滑（把稀疏控制点变成光滑曲线）。
     min_travel:
         小于该长度的空走会被并入绘制动作，避免无意义的抬落笔抖动。
+    stroke_wobble:
+        笔画运笔起伏幅度 (mm)。0 表示笔画走绝对直线。手写笔记的笔画
+        很少是直的，加一点起伏会明显更像手写。
     """
     trajectory = Trajectory()
     current: Optional[Point] = None
@@ -221,6 +273,10 @@ def plan_trajectory(
 
         if sample_step > 0:
             pts = resample(pts, sample_step)
+
+        if stroke_wobble > 0:
+            rng = random.Random(f"{wobble_seed}:{char}:{stroke_index}:{len(trajectory.actions)}")
+            pts = _wobble_stroke(pts, stroke_wobble, rng.uniform(0, 2 * math.pi))
 
         if len(pts) < 2:
             continue

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
@@ -37,6 +38,13 @@ class SimulationOptions:
 
     #: 线条宽度 (mm)
     stroke_width: float = 0.8
+
+    #: 模拟笔压的线宽波动比例（±）。0 表示所有笔画等宽。
+    #: 真实钢笔每笔轻重不同，等宽线条反而显得机械。
+    pressure_variation: float = 0.14
+
+    #: 笔压随机种子（保证可复现）
+    pressure_seed: int = 7788
 
     #: 背景色
     background: str = "#ffffff"
@@ -95,11 +103,11 @@ def render_svg(
     opts = options or SimulationOptions()
     to_px, scale, canvas_h = _build_projection(machine, opts)
 
-    draw_paths: List[str] = []
+    draw_paths: List[Tuple[str, float]] = []
     travel_paths: List[str] = []
     labels: List[str] = []
 
-    for action in trajectory.actions:
+    for index, action in enumerate(trajectory.actions):
         pts = [machine.to_machine(*p) for p in action.points]
         d = _path_data(pts, to_px)
         if not d:
@@ -107,7 +115,12 @@ def render_svg(
         if action.type == ActionType.TRAVEL:
             travel_paths.append(d)
         else:
-            draw_paths.append(d)
+            # 模拟笔压：每笔线宽略有不同
+            width = opts.stroke_width
+            if opts.pressure_variation > 0:
+                rng = random.Random(f"{opts.pressure_seed}:{index}")
+                width *= 1.0 + rng.uniform(-opts.pressure_variation, opts.pressure_variation)
+            draw_paths.append((d, width))
             if opts.show_stroke_numbers and action.char:
                 mx, my = to_px(pts[0])
                 labels.append(
@@ -132,10 +145,10 @@ def render_svg(
                 'stroke-dasharray="3 3" stroke-linecap="round"/>'
             )
 
-    for d in draw_paths:
+    for d, width in draw_paths:
         parts.append(
             f'<path d="{d}" fill="none" stroke="{opts.ink_color}" '
-            f'stroke-width="{opts.stroke_width:.2f}" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'stroke-width="{width:.2f}" stroke-linecap="round" stroke-linejoin="round"/>'
         )
 
     parts.extend(labels)
@@ -157,7 +170,7 @@ def render_html(
     travel_feed = max(machine.travel_feed, 1.0)
 
     segments: List[dict] = []
-    for action in trajectory.actions:
+    for index, action in enumerate(trajectory.actions):
         pts = [machine.to_machine(*p) for p in action.points]
         d = _path_data(pts, to_px)
         if not d:
@@ -167,6 +180,14 @@ def render_html(
             duration = length_mm / draw_feed * 60.0
         else:
             duration = length_mm / travel_feed * 60.0
+
+        # 模拟笔压：真实钢笔每一笔的轻重不同，线宽并非完全均匀。
+        # 这是纯视觉效果，G-code 里不含宽度信息（画笔粗细由笔尖决定）。
+        width = opts.stroke_width
+        if opts.pressure_variation > 0 and action.type == ActionType.DRAW:
+            rng = random.Random(f"{opts.pressure_seed}:{index}")
+            width *= 1.0 + rng.uniform(-opts.pressure_variation, opts.pressure_variation)
+
         segments.append(
             {
                 "type": action.type,
@@ -174,6 +195,7 @@ def render_html(
                 "dur": round(duration, 4),
                 "char": action.char,
                 "stroke": action.stroke_index,
+                "w": round(width, 4),
             }
         )
 
@@ -316,7 +338,7 @@ DATA.segments.forEach(seg => {
   p.setAttribute('stroke-linejoin', 'round');
   if (seg.type === 'draw') {
     p.setAttribute('stroke', DATA.inkColor);
-    p.setAttribute('stroke-width', DATA.strokeWidth);
+    p.setAttribute('stroke-width', seg.w || DATA.strokeWidth);
   } else {
     p.setAttribute('stroke', DATA.travelColor);
     p.setAttribute('stroke-width', Math.max(DATA.strokeWidth * 0.5, 0.4));
