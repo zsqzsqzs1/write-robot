@@ -68,6 +68,13 @@ class SimulationOptions:
     #: 播放按钮会从起点重新回放书写过程。
     show_final: bool = True
 
+    #: 表格内容（行 x 列的文本）。提供时预览页会多出一个「表格内容」标签页，
+    #: 直接用 HTML 表格展示文本本身，与「书写轨迹」视图对照。
+    table_data: Optional[List[List[str]]] = None
+
+    #: 表格标题（可选）
+    table_title: str = "表格内容"
+
 
 def _path_data(points: Sequence[Tuple[float, float]], to_px) -> str:
     """把点序列转成 SVG path 的 ``d`` 属性。"""
@@ -216,6 +223,8 @@ def render_html(
         "inkColor": opts.ink_color,
         "travelColor": opts.travel_color,
         "showTravel": opts.show_travel,
+        "tableData": opts.table_data,
+        "tableTitle": opts.table_title,
     }
 
     payload = json.dumps(meta, ensure_ascii=False)
@@ -279,25 +288,66 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 999px;
     background: var(--accent-soft); color: #1e40af; margin-left: 8px; vertical-align: 2px;
   }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tab {
+    font: inherit; font-size: 14px; padding: 8px 16px; border-radius: 8px;
+    border: 1px solid var(--border); background: #fff; color: var(--muted);
+    cursor: pointer; transition: all .15s;
+  }
+  .tab:hover { border-color: var(--accent); color: var(--accent); }
+  .tab.active {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  }
+  .view { display: none; }
+  .view.active { display: block; }
+  .table-wrap {
+    overflow-x: auto; display: flex; justify-content: center; padding: 8px 0;
+  }
+  table.content {
+    border-collapse: collapse; font-size: 17px; line-height: 1.6;
+    color: var(--text); min-width: 320px;
+  }
+  table.content th, table.content td {
+    border: 1px solid #c9cfda; padding: 14px 26px; text-align: center;
+    vertical-align: middle; white-space: nowrap;
+  }
+  table.content td { background: #fff; }
+  table.content tr:nth-child(even) td { background: #fafbfd; }
+  .hint {
+    font-size: 12.5px; color: var(--muted); margin-top: 14px; text-align: center;
+    line-height: 1.7;
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>__TITLE__</h1>
-  <div class="sub">按真实进给速度回放笔尖轨迹；可拖动进度条逐帧检查</div>
+  <div class="sub" id="subtitle"></div>
 
   <div class="card">
-    <div class="controls" style="margin-bottom:14px">
-      <button id="play">播放</button>
-      <button id="stop" class="ghost">停止</button>
-      <input type="range" id="seek" min="0" max="1000" value="0">
-      <span id="clock" style="font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted)">0.0s</span>
+    <div id="tabs" class="tabs" style="display:none">
+      <button class="tab" data-view="table">表格内容</button>
+      <button class="tab" data-view="trace">书写轨迹</button>
     </div>
-    <div class="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
-    <div class="legend">
-      <span><span class="swatch" style="background:var(--ink-color,#1a1a1a)"></span>落笔绘制</span>
-      <span><span class="swatch" style="background:var(--travel-color,#c9d6e8)"></span>抬笔空走</span>
-      <span><span class="swatch" style="background:#e07a2f;width:9px;height:9px;border-radius:50%"></span>笔尖位置</span>
+
+    <div id="view-table" class="view">
+      <div class="table-wrap"><table class="content" id="contentTable"></table></div>
+      <div class="hint">这是内容的表格形式；切到「书写轨迹」可以看机器实际怎么写出来。</div>
+    </div>
+
+    <div id="view-trace" class="view">
+      <div class="controls" style="margin-bottom:14px">
+        <button id="play">播放</button>
+        <button id="stop" class="ghost">停止</button>
+        <input type="range" id="seek" min="0" max="1000" value="0">
+        <span id="clock" style="font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted)">0.0s</span>
+      </div>
+      <div class="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--ink-color,#1a1a1a)"></span>落笔绘制</span>
+        <span><span class="swatch" style="background:var(--travel-color,#c9d6e8)"></span>抬笔空走</span>
+        <span><span class="swatch" style="background:#e07a2f;width:9px;height:9px;border-radius:50%"></span>笔尖位置</span>
+      </div>
     </div>
   </div>
 
@@ -308,6 +358,50 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 
 <script>
 const DATA = __DATA__;
+
+// ---- 表格视图 ----
+function renderTable() {
+  if (!DATA.tableData || !DATA.tableData.length) return false;
+  const t = document.getElementById('contentTable');
+  t.innerHTML = '';
+  DATA.tableData.forEach(row => {
+    const tr = document.createElement('tr');
+    row.forEach(cell => {
+      const td = document.createElement('td');
+      td.textContent = cell;
+      tr.appendChild(td);
+    });
+    t.appendChild(tr);
+  });
+  return true;
+}
+
+function switchView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  const tab = document.querySelector('.tab[data-view="' + name + '"]');
+  if (tab) tab.classList.add('active');
+}
+
+const hasTable = renderTable();
+if (hasTable) {
+  document.getElementById('subtitle').textContent =
+    '表格内容直接展示；切到「书写轨迹」可看机器实际怎么写出来';
+} else {
+  document.getElementById('subtitle').textContent =
+    '按真实进给速度回放笔尖轨迹；可拖动进度条逐帧检查';
+}
+if (hasTable) {
+  document.getElementById('tabs').style.display = 'flex';
+  document.querySelectorAll('.tab').forEach(b => {
+    b.addEventListener('click', () => switchView(b.dataset.view));
+  });
+  // 默认直接展示表格内容
+  switchView('table');
+} else {
+  switchView('trace');
+}
 
 const svg = document.getElementById('svg');
 const NS = 'http://www.w3.org/2000/svg';

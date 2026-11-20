@@ -343,6 +343,9 @@ def cmd_table(args: argparse.Namespace) -> int:
         demo_speed=args.speed,
         canvas_width=args.canvas_width,
         show_final=not args.animate,
+        # 预览页直接用 HTML 表格展示内容，与书写轨迹对照
+        table_data=rows,
+        table_title="表格内容",
     )
 
     if args.format == "svg":

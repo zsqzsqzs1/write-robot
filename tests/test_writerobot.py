@@ -252,6 +252,27 @@ class TestSimulator(unittest.TestCase):
         self.assertNotIn("<script src=", html)
         self.assertNotIn("<link rel=\"stylesheet\"", html)
 
+    def test_table_view_rendered_when_data_given(self):
+        """给了表格数据时，预览页应直接用 HTML 表格展示内容。"""
+        rows = [["我是一名小学生", "我是一名中学生"], ["我是工人", "我是老师"]]
+        html = render_html(
+            self.trajectory,
+            self.machine,
+            SimulationOptions(table_data=rows),
+        )
+        self.assertIn("表格内容", html)
+        self.assertIn("书写轨迹", html)
+        self.assertIn("renderTable", html)
+        # 表格内容以 JSON 形式嵌入
+        self.assertIn("我是一名小学生", html)
+
+    def test_no_table_view_without_data(self):
+        """没有表格数据时不应启用表格视图（标签页由 JS 隐藏）。"""
+        html = render_html(self.trajectory, self.machine)
+        # 模板里始终含有标签页按钮，但数据为 null 时 JS 不会启用它
+        self.assertIn('"tableData": null', html)
+        self.assertIn("view-trace", html)
+
 
 class TestPipeline(unittest.TestCase):
     def test_build_job_end_to_end(self):
