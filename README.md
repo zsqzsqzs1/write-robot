@@ -94,6 +94,25 @@ job = build_job(WriteRequest(text="你好世界", machine=machine))
 open("preview.html", "w", encoding="utf-8").write(render_preview(job))
 ```
 
+### 生成的文件在哪
+
+所有产物统一输出到项目目录下的 **`out/`**：
+
+| 文件 | 内容 | 怎么来的 |
+|---|---|---|
+| `out/preview.html` | 轨迹预览动画（双击即可用浏览器打开） | `preview` / 菜单选 1 |
+| `out/output.nc` | G-code 文件（可导入 GRBL 发送器） | `gcode` / 菜单选 2 |
+| `out/greeting.html` | 示例脚本生成的预览 | `python examples/write_greeting.py` |
+| `out/greeting.nc` | 示例脚本生成的 G-code | 同上 |
+
+用 `-o` 可以指定任意路径，程序会自动创建缺失的目录：
+
+```bash
+writerobot preview "你好" -o D:/tmp/我的字.html
+```
+
+命令行会打印文件的完整路径，方便直接定位。
+
 ### 先看看效果（不需要任何硬件）
 
 ```bash

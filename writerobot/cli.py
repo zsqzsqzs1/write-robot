@@ -297,9 +297,9 @@ def cmd_preview(args: argparse.Namespace) -> int:
         content = render_preview(job, sim_options, as_html=True)
         suffix = ".html"
 
-    out = Path(args.output) if args.output else Path(f"preview{suffix}")
+    out = Path(args.output) if args.output else Path("out") / f"preview{suffix}"
     out = _write_output(out, content)
-    print(f"预览已生成: {out}")
+    print(f"预览已生成: {out.resolve()}")
 
     if args.open:
         if _open_in_browser(out):
@@ -316,9 +316,9 @@ def cmd_gcode(args: argparse.Namespace) -> int:
     request = _build_request(args, machine)
     job = build_job(request)
 
-    out = Path(args.output) if args.output else Path("output.nc")
+    out = Path(args.output) if args.output else Path("out") / "output.nc"
     out = _write_output(out, job.gcode)
-    print(f"G-code 已生成: {out}")
+    print(f"G-code 已生成: {out.resolve()}")
     _print_summary(job, machine, str(out.resolve()))
     return 0
 
