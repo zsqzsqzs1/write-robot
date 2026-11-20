@@ -1,6 +1,13 @@
-"""通过 GitHub REST API 推送提交（当 git 端点不可达时的备用通道）。
+"""通过 GitHub REST API 推送本地提交（当 git 端点不可达时的备用通道）。
 
-用法：python tools/push_via_api.py <分支> <提交信息>
+背景：某些网络环境下 ``github.com``（git 端点）不通，而 ``api.github.com``
+通，此时普通 ``git push`` 会失败。本脚本改用 Git Data API 复现本地 HEAD：
+创建 blob -> 创建 tree -> 创建 commit -> 更新 ref。
+
+用法::
+
+    python tools/push_via_api.py                 # 推送本地 HEAD
+    python tools/push_via_api.py --message "..." # 指定提交信息
 """
 
 from __future__ import annotations
@@ -12,7 +19,11 @@ import sys
 from pathlib import Path
 
 REPO = "zsqzsqzs1/write-robot"
+BRANCH = "master"
 GH = r"C:\Program Files\GitHub CLI\gh.exe"
+
+# 不纳入仓库的工具目录
+EXCLUDE_DIRS = {"out", ".git", "__pycache__", ".pytest_cache"}
 
 
 def gh_api(method: str, path: str, payload: dict | None = None) -> dict:
@@ -33,53 +44,53 @@ def gh_api(method: str, path: str, payload: dict | None = None) -> dict:
     return json.loads(result.stdout)
 
 
-def main() -> int:
-    branch = sys.argv[1] if len(sys.argv) > 1 else "master"
-    message = sys.argv[2] if len(sys.argv) > 2 else "update"
+def git(*args: str) -> str:
+    result = subprocess.run(
+        ["git", *args], capture_output=True, text=True, encoding="utf-8"
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)} 失败:\n{result.stderr}")
+    return result.stdout
 
+
+def main() -> int:
     root = Path(__file__).resolve().parent.parent
 
-    # 1. 收集要上传的文件（相对上次推送新增/修改的）
-    #    -uall 把未跟踪目录展开成一个个文件，避免目录被当成文件上传
-    status = subprocess.run(
-        ["git", "status", "--porcelain", "-uall"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    ).stdout
-    files = []
-    for line in status.splitlines():
+    message = None
+    if "--message" in sys.argv:
+        message = sys.argv[sys.argv.index("--message") + 1]
+    if message is None:
+        message = git("log", "-1", "--pretty=%B").strip()
+
+    # 1. 列出本地 HEAD 里的所有文件
+    listing = git("ls-tree", "-r", "HEAD", "--format=%(objectmode) %(path)")
+    entries = []
+    for line in listing.splitlines():
         if not line.strip():
             continue
-        code, path = line[:2].strip(), line[3:].strip()
-        if "D" in code:
+        mode, path = line.split(" ", 1)
+        if any(part in EXCLUDE_DIRS for part in Path(path).parts):
             continue
-        if (root / path).is_dir():
-            continue
-        files.append((path, code))
+        entries.append((mode, path))
 
-    if not files:
-        print("没有待推送的改动")
-        return 0
+    print(f"本地 HEAD 共 {len(entries)} 个文件")
 
-    # 2. 为每个文件创建 blob
+    # 2. 创建 blob
     tree_entries = []
-    for path, code in files:
+    for mode, path in entries:
         data = (root / path).read_bytes()
         blob = gh_api(
             "POST",
             f"/repos/{REPO}/git/blobs",
             {"content": base64.b64encode(data).decode(), "encoding": "base64"},
         )
-        mode = "100755" if path.endswith(".bat") or path.endswith(".sh") else "100644"
         tree_entries.append(
             {"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]}
         )
-        print(f"  blob {blob['sha'][:8]}  {path}")
+    print(f"  已上传 {len(tree_entries)} 个 blob")
 
-    # 3. 基于当前分支创建新 tree
-    ref = gh_api("GET", f"/repos/{REPO}/git/ref/heads/{branch}")
+    # 3. 基于远端当前分支创建新 tree
+    ref = gh_api("GET", f"/repos/{REPO}/git/ref/heads/{BRANCH}")
     base_commit = ref["object"]["sha"]
     base_tree = gh_api("GET", f"/repos/{REPO}/git/commits/{base_commit}")["tree"]["sha"]
 
@@ -101,11 +112,12 @@ def main() -> int:
     # 5. 更新分支引用
     gh_api(
         "PATCH",
-        f"/repos/{REPO}/git/refs/heads/{branch}",
+        f"/repos/{REPO}/git/refs/heads/{BRANCH}",
         {"sha": commit["sha"], "force": False},
     )
-    print(f"\n已推送到 {REPO}@{branch}: {commit['sha'][:8]}")
-    print(f"文件数: {len(tree_entries)}")
+    print(f"\n已推送到 {REPO}@{BRANCH}")
+    print(f"提交: {commit['sha'][:8]}  (远端基线 {base_commit[:8]})")
+    print(f"信息: {message.splitlines()[0]}")
     return 0
 
 
