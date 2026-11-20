@@ -1,0 +1,41 @@
+name: 问题反馈
+description: 报告 bug 或提出功能建议
+labels: ["需要反馈"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请先看看 [README 的常见问题](https://github.com/zsqzsqzs1/write-robot#常见问题)，
+        里面可能已经有答案。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 描述你遇到的现象
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 使用的命令、文本内容、机器配置等
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: machine
+    attributes:
+      label: 机器配置
+      description: 贴出 `writerobot config` 的输出
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: write-robot 版本
+      placeholder: write-robot 1.0.0
+    validations:
+      required: true
