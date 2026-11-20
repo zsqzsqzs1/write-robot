@@ -35,7 +35,7 @@
 | **CoreXY 支持** | 固件解算与上位机解算两种路径都支持，公式与 GRBL `planner.c` 中的 `COREXY` 分支一致 |
 | **抬落笔可配** | Z 轴升降（`G0 Z`）或 RC 舵机（`M3 S`），对应 `grbl-servo` 固件的 PWM 语义 |
 | **纯 Python** | 核心功能零依赖；只有串口下发需要 `pyserial` |
-| **可复现** | 51 项单元测试覆盖几何、排版、轨迹、G-code 与模拟器 |
+| **可复现** | 55 项单元测试覆盖几何、排版、轨迹、G-code 与模拟器 |
 
 ---
 
@@ -52,6 +52,39 @@ pip install -e ".[serial]"  # 需要串口下发时
 
 Python 3.9+，无需编译。
 
+### 三种运行方式，任选其一
+
+**A. 命令行（推荐，跨平台）**
+
+```bash
+writerobot preview "你好世界" -o preview.html --font-size 60 --align center --valign center
+```
+
+若提示找不到 `writerobot` 命令，说明 Scripts 目录不在 PATH 里，
+改用等价的模块调用即可，功能完全一样：
+
+```bash
+python -m writerobot.cli preview "你好世界" -o preview.html
+```
+
+**B. Windows 启动脚本**
+
+```bat
+wr.bat preview "你好世界"      REM 生成预览到 out\preview.html
+wr.bat gcode   "你好世界"      REM 生成 G-code 到 out\output.nc
+wr.bat run     "你好世界"      REM 连机器书写
+```
+
+**C. 作为库调用**
+
+```python
+from writerobot import MachineConfig, WriteRequest, build_job, render_preview
+
+machine = MachineConfig(kinematics="corexy", width=200, height=200)
+job = build_job(WriteRequest(text="你好世界", machine=machine))
+open("preview.html", "w", encoding="utf-8").write(render_preview(job))
+```
+
 ### 先看看效果（不需要任何硬件）
 
 ```bash
@@ -60,6 +93,12 @@ writerobot preview "你好世界" -o preview.html --font-size 60 --align center 
 
 用浏览器打开 `preview.html`：深色是落笔绘制的笔画，浅蓝虚线是抬笔空走的路径，
 橙色圆点是笔尖位置。点「播放」按真实速度回放。
+
+想直接让浏览器弹出，加 `--open`：
+
+```bash
+writerobot preview "你好世界" --open
+```
 
 ### 生成 G-code
 
@@ -73,6 +112,9 @@ writerobot gcode "你好世界" -o out.nc --machine examples/machine_corexy_serv
 writerobot ports                              # 先看看串口在哪
 writerobot run "你好世界" --port COM3 --machine examples/machine_corexy_servo.json
 ```
+
+> **Windows 用户注意**：命令行直接敲中文可能因控制台代码页（GBK）出现乱码，
+> 此时先执行 `chcp 65001` 切换到 UTF-8。
 
 ---
 
@@ -101,6 +143,7 @@ writerobot init-config       生成一份机器配置模板
 | `--no-smooth` | 不做样条平滑 |
 | `--machine` | 机器配置文件 |
 | `--pen-mode` | `z`（Z 轴）或 `servo`（舵机） |
+| `--open` | 预览生成后自动用浏览器打开 |
 | `--demo` / `--speed` | 预览加速播放 |
 | `--offline` | 离线模式，只用本地缓存的汉字数据 |
 
@@ -293,7 +336,8 @@ write-robot/
 │   ├── serial_link.py  GRBL 串口通信（握手、状态查询、逐行流控）
 │   ├── pipeline.py     高层流水线
 │   └── cli.py          命令行入口
-├── tests/              51 项单元测试
+├── wr.bat              Windows 一键启动脚本
+├── tests/              55 项单元测试
 ├── examples/           示例配置与示例脚本
 └── docs/
 ```
@@ -320,7 +364,17 @@ write-robot/
 
 **Q：下载汉字数据很慢？**
 数据源默认走 jsdelivr CDN（实测 ~1.2s/字符），失败时自动降级到 GitHub Raw。
-首次下载后会缓存，之后离线可用。
+首次下载后会缓存，之后离线可用。写纯英文时**完全不发起网络请求**——
+ASCII 字符直接查内置拉丁字体。
+
+**Q：提示「找不到 writerobot 命令」？**
+Windows 上 pip 的 Scripts 目录可能不在 PATH。用 `python -m writerobot.cli` 等价替代，
+或直接用仓库里的 `wr.bat`。
+
+**Q：Windows 下脚本会卡住不动？**
+早期版本把启动脚本命名为 `writerobot.bat`，而脚本内部又调用 `writerobot`，
+CMD 会优先在当前目录找到这个 bat 文件，导致无限递归卡死。现在脚本名为 `wr.bat`，
+且内部固定用 `python -m writerobot.cli` 调用，不会再出现这个问题。
 
 **Q：支持的字符有哪些？**
 `hanzi-writer-data` 收录了约 9000 个常用汉字，加上一套内置的拉丁字母、

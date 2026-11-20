@@ -70,6 +70,54 @@ class FakeProvider(GlyphProvider):
         )
 
 
+class TestGlyphRouting(unittest.TestCase):
+    """字符路由与故障降级的回归测试。"""
+
+    def test_is_hanzi(self):
+        from writerobot.glyphs import is_hanzi
+
+        for ch in "你你好世界的一":
+            self.assertTrue(is_hanzi(ch), f"{ch} 应识别为汉字")
+        for ch in "ABCabc123 ,.":
+            self.assertFalse(is_hanzi(ch), f"{ch} 不应识别为汉字")
+
+    def test_ascii_never_hits_network(self):
+        """ASCII 字符必须直接走内置字体，不发起网络请求。"""
+
+        class ExplodingProvider(GlyphProvider):
+            name = "boom"
+
+            def get(self, char):
+                raise AssertionError(f"不该请求 {char!r}")
+
+        repo = GlyphRepository([ExplodingProvider(), LatinProvider()])
+        glyph = repo.get("A")
+        self.assertIsNotNone(glyph)
+        self.assertEqual(glyph.source, "builtin-latin")
+
+    def test_provider_failure_does_not_abort(self):
+        """单个数据源故障应降级为警告，而不是让整个任务失败。"""
+
+        class BrokenProvider(GlyphProvider):
+            name = "broken"
+
+            def get(self, char):
+                raise OSError("网络不可达")
+
+        repo = GlyphRepository([BrokenProvider(), LatinProvider()])
+        glyph = repo.get("A")
+        self.assertIsNotNone(glyph, "备用来源应当兜住")
+        self.assertTrue(repo.warnings)
+        self.assertIn("broken", repo.warnings[0])
+
+    def test_hanzi_provider_skips_non_hanzi(self):
+        from writerobot.glyphs import HanziProvider
+
+        provider = HanziProvider(offline=True)
+        self.assertIsNone(provider.get("A"))
+        self.assertIsNone(provider.get("1"))
+
+
 class TestMachineConfig(unittest.TestCase):
     def test_default_valid(self):
         MachineConfig().validate()

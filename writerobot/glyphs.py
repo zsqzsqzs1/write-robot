@@ -38,6 +38,7 @@ __all__ = [
     "GlyphRepository",
     "HANZI_DATA_URL",
     "HANZI_EM_BOX",
+    "is_hanzi",
 ]
 
 #: 单个汉字数据的下载地址模板（jsdelivr 为主，GitHub raw 为备）
@@ -53,6 +54,30 @@ HANZI_EM_BOX = 1024.0
 #: 若误用 0..1024 归一化，汉字会整体上移约 12% 字高。
 HANZI_INK_TOP = -124.0
 HANZI_INK_BOTTOM = 900.0
+
+
+#: 汉字可能出现的 Unicode 区段
+_HANZI_RANGES = (
+    (0x2E80, 0x2EFF),  # CJK 部首补充
+    (0x3005, 0x3005),  # 々
+    (0x3007, 0x3007),  # 〇
+    (0x3021, 0x3029),  # 汉字数字
+    (0x3038, 0x303B),
+    (0x3400, 0x4DBF),  # 扩展 A
+    (0x4E00, 0x9FFF),  # 基本区
+    (0xF900, 0xFAFF),  # 兼容表意文字
+    (0x20000, 0x2A6DF),  # 扩展 B
+    (0x2A700, 0x2EBEF),
+    (0x2F800, 0x2FA1F),  # 兼容补充
+)
+
+
+def is_hanzi(char: str) -> bool:
+    """判断字符是否可能出现在汉字笔画数据里。"""
+    if not char:
+        return False
+    code = ord(char[0])
+    return any(lo <= code <= hi for lo, hi in _HANZI_RANGES)
 
 
 @dataclass
@@ -195,6 +220,11 @@ class HanziProvider(GlyphProvider):
         if char in self._cache:
             return self._cache[char]
 
+        # 非汉字直接跳过，避免为拉丁字母/标点发起无谓的网络请求
+        if not is_hanzi(char):
+            self._cache[char] = None
+            return None
+
         payload = self._load_cached(char)
         if payload is None:
             payload = self._download(char)
@@ -232,10 +262,20 @@ class HanziProvider(GlyphProvider):
 
 
 class GlyphRepository:
-    """字形仓库：按优先级依次询问多个来源。"""
+    """字形仓库：按优先级依次询问多个来源。
+
+    设计要点：
+
+    * **按字符类别路由**。ASCII 字符直接查内置拉丁字体，不发起任何网络请求；
+      只有可能是汉字的字符才会去查笔画数据。这样写英文时完全不依赖网络。
+    * **单个来源失败不影响整体**。网络抖动导致汉字数据取不到时，会记录一条
+      警告并继续尝试下一个来源，而不是让整个任务失败。
+    """
 
     def __init__(self, providers: Sequence[GlyphProvider]) -> None:
         self.providers = list(providers)
+        #: 采集到的警告信息（如某个字形因网络问题缺失）
+        self.warnings: List[str] = []
 
     @classmethod
     def default(
@@ -247,7 +287,12 @@ class GlyphRepository:
 
     def get(self, char: str) -> Optional[Glyph]:
         for provider in self.providers:
-            glyph = provider.get(char)
+            try:
+                glyph = provider.get(char)
+            except Exception as exc:
+                # 数据源故障不应中断整体流程
+                self.warnings.append(f"{provider.name} 取字形 {char!r} 失败: {exc}")
+                continue
             if glyph is not None and glyph.strokes:
                 return glyph
         return None

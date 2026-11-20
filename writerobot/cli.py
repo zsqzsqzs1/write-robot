@@ -159,6 +159,24 @@ def _print_summary(job, machine: MachineConfig, out: Optional[str]) -> None:
 
 # ---------------------------------------------------------------- 子命令
 
+def _open_in_browser(path: Path) -> bool:
+    """用系统默认程序打开文件（非阻塞）。失败时返回 False。"""
+    import os
+    import subprocess
+    import sys as _sys
+
+    try:
+        if _sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif _sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+        return True
+    except Exception:
+        return False
+
+
 def cmd_preview(args: argparse.Namespace) -> int:
     machine = _machine_from_args(args)
     request = _build_request(args, machine)
@@ -182,6 +200,13 @@ def cmd_preview(args: argparse.Namespace) -> int:
     out = Path(args.output) if args.output else Path(f"preview{suffix}")
     out = _write_output(out, content)
     print(f"预览已生成: {out}")
+
+    if args.open:
+        if _open_in_browser(out):
+            print("已在浏览器中打开")
+        else:
+            print("（未能自动打开浏览器，请手动双击该文件）")
+
     _print_summary(job, machine, str(out.resolve()))
     return 0
 
@@ -301,6 +326,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-travel", action="store_true", help="不显示空走轨迹")
     p.add_argument("--no-stroke-numbers", action="store_true", help="不显示笔顺编号")
     p.add_argument("--canvas-width", type=int, default=800, help="画布宽度（像素）")
+    p.add_argument("--open", action="store_true", help="生成后用浏览器打开预览")
     p.add_argument("--corner-radius", type=float, default=0.6, help="拐角圆滑半径（mm）")
     p.add_argument("--cache-dir", default=None, help="汉字数据缓存目录")
     p.add_argument("--offline", action="store_true", help="离线模式，只用本地缓存")
