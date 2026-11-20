@@ -28,7 +28,7 @@ cd /d "%~dp0"
 
 set "WR=python -m writerobot.cli"
 
-if "%~1"=="" goto usage
+if "%~1"=="" goto menu
 if "%~1"=="help" goto usage
 if "%~1"=="preview" goto preview
 if "%~1"=="gcode" goto gcode
@@ -41,6 +41,7 @@ goto :eof
 echo.
 echo   write-robot - writing robot controller
 echo   --------------------------------------------
+echo   wr.bat                    interactive menu (Chinese)
 echo   wr.bat preview "text"    trajectory preview (no hardware needed)
 echo   wr.bat gcode   "text"    generate G-code to out\output.nc
 echo   wr.bat run     "text"    connect to machine and write
@@ -48,6 +49,14 @@ echo   wr.bat ports             list serial ports
 echo.
 echo   Run "wr.bat preview --help" for all options.
 echo.
+pause
+goto :eof
+
+:menu
+REM  The interactive menu lives in Python so that Chinese text is not
+REM  corrupted by the CMD code page. Python also keeps the window open
+REM  at the end, so double-clicking this file shows something.
+%WR% menu
 goto :eof
 
 :preview

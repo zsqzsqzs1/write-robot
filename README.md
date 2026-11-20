@@ -54,7 +54,24 @@ Python 3.9+，无需编译。
 
 ### 三种运行方式，任选其一
 
-**A. 命令行（推荐，跨平台）**
+**A. 双击 `wr.bat`（最省事）**
+
+在项目目录里双击 `wr.bat`，会弹出中文交互菜单：
+
+```
+  write-robot · 写字机器人上位机
+  --------------------------------------------
+  1) 预览轨迹      生成 HTML 动画，看笔尖怎么走（无需硬件）
+  2) 生成 G-code   输出 .nc 文件，可导入 GRBL 发送器
+  3) 连接机器书写  需要先接好硬件
+  4) 列出串口
+  5) 查看机器配置
+  0) 退出
+```
+
+选 1 输入文字和字号即可生成预览，程序会一直等你在窗口里按回车才关闭。
+
+**B. 命令行（跨平台，可脚本化）**
 
 ```bash
 writerobot preview "你好世界" -o preview.html --font-size 60 --align center --valign center
@@ -65,14 +82,6 @@ writerobot preview "你好世界" -o preview.html --font-size 60 --align center 
 
 ```bash
 python -m writerobot.cli preview "你好世界" -o preview.html
-```
-
-**B. Windows 启动脚本**
-
-```bat
-wr.bat preview "你好世界"      REM 生成预览到 out\preview.html
-wr.bat gcode   "你好世界"      REM 生成 G-code 到 out\output.nc
-wr.bat run     "你好世界"      REM 连机器书写
 ```
 
 **C. 作为库调用**
@@ -121,6 +130,7 @@ writerobot run "你好世界" --port COM3 --machine examples/machine_corexy_serv
 ## 命令一览
 
 ```
+writerobot menu              交互菜单（双击 wr.bat 时进入）
 writerobot preview <文字>    生成轨迹预览（HTML 动画 / SVG），无需硬件
 writerobot gcode   <文字>    生成 G-code 文件
 writerobot run     <文字>    连接机器并直接书写
@@ -370,6 +380,12 @@ ASCII 字符直接查内置拉丁字体。
 **Q：提示「找不到 writerobot 命令」？**
 Windows 上 pip 的 Scripts 目录可能不在 PATH。用 `python -m writerobot.cli` 等价替代，
 或直接用仓库里的 `wr.bat`。
+
+**Q：双击 wr.bat 窗口一闪就没了 / 什么都没发生？**
+双击会进入中文交互菜单，选 0 退出时程序会等你按回车才关闭。
+如果想看命令行帮助，用 `wr.bat help`（会 `pause` 停住）。
+另外双击时若提示「python 不是内部或外部命令」，说明 Python 没在 PATH 里，
+请改用完整路径调用，或重新安装时勾选 Add to PATH。
 
 **Q：Windows 下脚本会卡住不动？**
 早期版本把启动脚本命名为 `writerobot.bat`，而脚本内部又调用 `writerobot`，

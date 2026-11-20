@@ -177,6 +177,106 @@ def _open_in_browser(path: Path) -> bool:
         return False
 
 
+def _prompt(message: str, default: str = "") -> str:
+    """读取一行输入；非交互环境（无 stdin）时返回默认值。"""
+    try:
+        text = input(message).strip()
+    except (EOFError, KeyboardInterrupt):
+        return default
+    return text or default
+
+
+def cmd_menu(args: argparse.Namespace) -> int:
+    """交互菜单：双击 wr.bat 时进入这里。"""
+    print()
+    print("  write-robot · 写字机器人上位机")
+    print("  " + "-" * 44)
+    print("  1) 预览轨迹      生成 HTML 动画，看笔尖怎么走（无需硬件）")
+    print("  2) 生成 G-code   输出 .nc 文件，可导入 GRBL 发送器")
+    print("  3) 连接机器书写  需要先接好硬件")
+    print("  4) 列出串口")
+    print("  5) 查看机器配置")
+    print("  0) 退出")
+    print()
+
+    while True:
+        choice = _prompt("  请选择 [1-5，0 退出]: ", "0")
+        if choice in ("0", "q", "Q", "exit"):
+            break
+        if choice == "1":
+            _menu_preview(args)
+        elif choice == "2":
+            _menu_gcode(args)
+        elif choice == "3":
+            _menu_run(args)
+        elif choice == "4":
+            cmd_ports(args)
+        elif choice == "5":
+            cmd_config(args)
+        else:
+            print("  无效选项，请输入 1-5 或 0")
+            continue
+        print()
+
+    print("  再见。")
+    _pause()
+    return 0
+
+
+def _pause() -> None:
+    """双击运行时保持窗口不关闭。"""
+    try:
+        input("\n  按回车键关闭窗口...")
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
+def _menu_preview(args: argparse.Namespace) -> None:
+    text = _prompt("  要写的文字: ")
+    if not text:
+        print("  已取消")
+        return
+    font_size = _prompt("  字号（mm，默认 40）: ", "40")
+    try:
+        size = float(font_size)
+    except ValueError:
+        size = 40.0
+    out = _prompt("  输出文件（默认 out\\preview.html）: ", "out\\preview.html")
+    ns = argparse.Namespace(**vars(args))
+    ns.text = text
+    ns.font_size = size
+    ns.output = out
+    ns.format = "html"
+    cmd_preview(ns)
+
+
+def _menu_gcode(args: argparse.Namespace) -> None:
+    text = _prompt("  要写的文字: ")
+    if not text:
+        print("  已取消")
+        return
+    out = _prompt("  输出文件（默认 out\\output.nc）: ", "out\\output.nc")
+    ns = argparse.Namespace(**vars(args))
+    ns.text = text
+    ns.output = out
+    cmd_gcode(ns)
+
+
+def _menu_run(args: argparse.Namespace) -> None:
+    text = _prompt("  要写的文字: ")
+    if not text:
+        print("  已取消")
+        return
+    port = _prompt("  串口（如 COM3）: ")
+    if not port:
+        print("  未指定串口，已取消")
+        return
+    ns = argparse.Namespace(**vars(args))
+    ns.text = text
+    ns.port = port
+    cmd_run(ns)
+
+
 def cmd_preview(args: argparse.Namespace) -> int:
     machine = _machine_from_args(args)
     request = _build_request(args, machine)
@@ -307,6 +407,27 @@ def cmd_init_config(args: argparse.Namespace) -> int:
 
 # ---------------------------------------------------------------- 解析器
 
+def _add_preview_args(parser: argparse.ArgumentParser) -> None:
+    """preview 专用参数。menu 也要带上，因为菜单里能调用 preview。"""
+    parser.add_argument("--format", choices=("html", "svg"), default="html", help="输出格式")
+    parser.add_argument("--demo", action="store_true", help="演示模式（加速播放）")
+    parser.add_argument("--speed", type=float, default=4.0, help="演示速度倍率")
+    parser.add_argument("--no-travel", action="store_true", help="不显示空走轨迹")
+    parser.add_argument("--no-stroke-numbers", action="store_true", help="不显示笔顺编号")
+    parser.add_argument("--canvas-width", type=int, default=800, help="画布宽度（像素）")
+    parser.add_argument("--open", action="store_true", help="生成后用浏览器打开预览")
+
+
+def _add_job_args(parser: argparse.ArgumentParser) -> None:
+    """gcode / run 专用参数。menu 也要带上。"""
+    parser.add_argument("--corner-radius", type=float, default=0.6, help="拐角圆滑半径（mm）")
+    parser.add_argument("--sample-step", type=float, default=0.5, help="弧长重采样步长（mm）")
+    parser.add_argument("--no-smooth", action="store_true", help="不做样条平滑")
+    parser.add_argument("--line-numbers", action="store_true", help="G-code 带行号")
+    parser.add_argument("--cache-dir", default=None, help="汉字数据缓存目录")
+    parser.add_argument("--offline", action="store_true", help="离线模式，只用本地缓存")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="writerobot",
@@ -315,6 +436,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"write-robot {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # menu
+    m = sub.add_parser("menu", help="交互菜单（双击 wr.bat 时进入）")
+    _add_layout_args(m)
+    _add_machine_args(m)
+    _add_preview_args(m)
+    _add_job_args(m)
+    m.add_argument("--port", default=None, help="串口设备")
+    m.add_argument("--baudrate", type=int, default=115200, help="波特率")
+    m.add_argument("--timeout", type=float, default=5.0, help="串口读超时（秒）")
+    m.add_argument("--status", action="store_true", help="开始前查询机器状态")
+    m.add_argument("--dry-run", action="store_true", help="只打印 G-code，不发送")
+    m.set_defaults(func=cmd_menu)
 
     # preview
     p = sub.add_parser("preview", help="生成轨迹预览（HTML 动画或 SVG），无需硬件")
@@ -338,12 +472,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = sub.add_parser("gcode", help="生成 G-code 文件")
     g.add_argument("text", help="要写的文字")
     g.add_argument("-o", "--output", default=None, help="输出文件")
-    g.add_argument("--corner-radius", type=float, default=0.6, help="拐角圆滑半径（mm）")
-    g.add_argument("--sample-step", type=float, default=0.5, help="弧长重采样步长（mm）")
-    g.add_argument("--no-smooth", action="store_true", help="不做样条平滑")
-    g.add_argument("--line-numbers", action="store_true", help="G-code 带行号")
-    g.add_argument("--cache-dir", default=None, help="汉字数据缓存目录")
-    g.add_argument("--offline", action="store_true", help="离线模式")
+    _add_job_args(g)
     _add_layout_args(g)
     _add_machine_args(g)
     g.set_defaults(func=cmd_gcode)
@@ -356,12 +485,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--timeout", type=float, default=5.0, help="串口读超时（秒）")
     r.add_argument("--status", action="store_true", help="开始前查询机器状态")
     r.add_argument("--dry-run", action="store_true", help="只打印 G-code，不发送")
-    r.add_argument("--corner-radius", type=float, default=0.6, help="拐角圆滑半径（mm）")
-    r.add_argument("--sample-step", type=float, default=0.5, help="弧长重采样步长（mm）")
-    r.add_argument("--no-smooth", action="store_true", help="不做样条平滑")
-    r.add_argument("--line-numbers", action="store_true", help="G-code 带行号")
-    r.add_argument("--cache-dir", default=None, help="汉字数据缓存目录")
-    r.add_argument("--offline", action="store_true", help="离线模式")
+    _add_job_args(r)
     _add_layout_args(r)
     _add_machine_args(r)
     r.set_defaults(func=cmd_run)
