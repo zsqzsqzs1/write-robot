@@ -8,7 +8,8 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # 固定 22.04：Ubuntu 26.04 的 runner 镜像已不再提供 Python 3.9
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
