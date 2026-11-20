@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "write-robot"
+version = "1.0.0"
+description = "写字机器人上位机：把文字变成会动的笔，再变成机器能执行的 G-code"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "write-robot contributors" }]
+keywords = ["写字机器人", "plotter", "gcode", "grbl", "corexy", "hanzi"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# 串口下发功能需要
+serial = ["pyserial>=3.5"]
+dev = ["pyserial>=3.5", "pytest>=7.0"]
+
+[project.scripts]
+writerobot = "writerobot.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/zsqzsqzs1/write-robot"
+Repository = "https://github.com/zsqzsqzs1/write-robot"
+Issues = "https://github.com/zsqzsqzs1/write-robot/issues"
+
+[tool.setuptools]
+packages = ["writerobot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"

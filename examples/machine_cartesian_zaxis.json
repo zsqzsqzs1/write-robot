@@ -1,0 +1,20 @@
+{
+  "name": "cartesian-300-zaxis",
+  "kinematics": "cartesian",
+  "width": 300.0,
+  "height": 220.0,
+  "origin": "front-left",
+  "draw_feed": 2400.0,
+  "travel_feed": 8000.0,
+  "sample_step": 0.5,
+  "verbose": true,
+  "corexy_host_solve": false,
+  "pen": {
+    "mode": "z",
+    "z_up": 12.0,
+    "z_down": 0.0,
+    "servo_down": 0,
+    "servo_up": 1000,
+    "z_feed": 1500.0
+  }
+}

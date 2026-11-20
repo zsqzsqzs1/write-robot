@@ -1,0 +1,20 @@
+{
+  "name": "corexy-200-servo",
+  "kinematics": "corexy",
+  "width": 200.0,
+  "height": 200.0,
+  "origin": "front-left",
+  "draw_feed": 3000.0,
+  "travel_feed": 9000.0,
+  "sample_step": 0.5,
+  "verbose": true,
+  "corexy_host_solve": false,
+  "pen": {
+    "mode": "servo",
+    "z_up": 10.0,
+    "z_down": 0.0,
+    "servo_down": 0,
+    "servo_up": 1000,
+    "z_feed": 1200.0
+  }
+}
