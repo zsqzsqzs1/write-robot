@@ -45,6 +45,12 @@ __all__ = [
 HANZI_DATA_URL = "https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0.1/{}.json"
 HANZI_DATA_FALLBACK_URL = "https://raw.githubusercontent.com/chanind/hanzi-writer-data/master/data/{}.json"
 
+#: 最后的兜底：GitHub API。某些网络环境只放行 api.github.com，
+#: 而 cdn.jsdelivr.net 与 raw.githubusercontent.com 均不可达。
+HANZI_DATA_API_URL = (
+    "https://api.github.com/repos/chanind/hanzi-writer-data/contents/data/{}.json"
+)
+
 #: hanzi-writer-data 的画布边长
 HANZI_EM_BOX = 1024.0
 
@@ -142,17 +148,23 @@ class HanziProvider(GlyphProvider):
         cache_dir: Optional[Path] = None,
         url_template: str = HANZI_DATA_URL,
         fallback_url_template: Optional[str] = HANZI_DATA_FALLBACK_URL,
+        api_url_template: Optional[str] = HANZI_DATA_API_URL,
         timeout: float = 20.0,
         offline: bool = False,
         user_agent: str = "write-robot/1.0 (+https://github.com/chanind/hanzi-writer-data)",
+        github_token: Optional[str] = None,
     ) -> None:
         self.cache_dir = Path(cache_dir) if cache_dir else Path.home() / ".cache" / "write-robot" / "hanzi"
         self.url_template = url_template
         self.fallback_url_template = fallback_url_template
+        self.api_url_template = api_url_template
         self.timeout = timeout
         self.offline = offline
         self.user_agent = user_agent
+        self.github_token = github_token or os.environ.get("GITHUB_TOKEN") or None
         self._cache: Dict[str, Optional[Glyph]] = {}
+        #: 上次成功下载所用的源下标，后续字符优先使用
+        self._preferred_source: Optional[int] = None
 
     # ---------------------------------------------------------------- 缓存
 
@@ -184,34 +196,54 @@ class HanziProvider(GlyphProvider):
     # ---------------------------------------------------------------- 下载
 
     def _download(self, char: str) -> Optional[dict]:
-        """下载单个汉字数据。主源失败时自动降级到备用源。
+        """下载单个汉字数据。按 CDN → GitHub API → GitHub Raw 依次尝试。
+
+        三个源各有各的可用性：某些网络环境只放行 ``api.github.com``，
+        另一些只放行 CDN。逐个降级能让下载成功率显著提高。
+
+        一旦某个源成功，会被记为「首选源」，后续字符直接先试它，
+        避免每个字都去撞一遍不通的源。
 
         返回 ``None`` 表示「该字符没有收录」（如拉丁字母），属于正常情况。
         """
         if self.offline:
             return None
 
-        templates = [self.url_template]
+        quoted = urllib.parse.quote(char)
+        sources: List[Tuple[str, str, dict]] = []
+        if self.url_template:
+            sources.append((self.url_template, quoted, {}))
+        if self.api_url_template:
+            headers = {"Accept": "application/vnd.github.raw"}
+            if self.github_token:
+                headers["Authorization"] = f"Bearer {self.github_token}"
+            sources.append((self.api_url_template, quoted, headers))
         if self.fallback_url_template:
-            templates.append(self.fallback_url_template)
+            sources.append((self.fallback_url_template, quoted, {}))
+
+        # 把上次成功的源调到最前
+        if self._preferred_source is not None and 0 <= self._preferred_source < len(sources):
+            preferred = sources.pop(self._preferred_source)
+            sources.insert(0, preferred)
 
         last_error: Optional[Exception] = None
-        for tpl in templates:
-            url = tpl.format(urllib.parse.quote(char))
-            request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
-            for attempt in range(2):
-                try:
-                    with urllib.request.urlopen(request, timeout=self.timeout) as resp:
-                        return json.loads(resp.read().decode("utf-8"))
-                except urllib.error.HTTPError as exc:
-                    # 404 表示该字符没有收录（常见于拉丁字母、标点），不是网络故障
-                    if exc.code == 404:
-                        return None
-                    last_error = exc
-                except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
-                    last_error = exc
-                if attempt == 0:
-                    time.sleep(0.5)
+        for index, (tpl, arg, extra_headers) in enumerate(sources):
+            url = tpl.format(arg)
+            headers = {"User-Agent": self.user_agent}
+            headers.update(extra_headers)
+            request = urllib.request.Request(url, headers=headers)
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                self._preferred_source = index
+                return payload
+            except urllib.error.HTTPError as exc:
+                # 404 表示该字符没有收录（常见于拉丁字母、标点），不是网络故障
+                if exc.code == 404:
+                    return None
+                last_error = exc
+            except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+                last_error = exc
         raise IOError(f"下载汉字数据失败: {char!r} ({last_error})")
 
     # ---------------------------------------------------------------- 接口

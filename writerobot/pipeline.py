@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 from .gcode import GCodeGenerator
 from .glyphs import GlyphRepository
@@ -16,7 +16,7 @@ from .machine import MachineConfig
 from .simulator import SimulationOptions, render_html, render_svg
 from .trajectory import Trajectory, plan_trajectory
 
-__all__ = ["WriteRequest", "WriteJob", "build_job"]
+__all__ = ["WriteRequest", "WriteJob", "build_job", "build_table_job"]
 
 
 @dataclass
@@ -54,12 +54,14 @@ class WriteRequest:
 class WriteJob:
     """一次书写任务的产物。"""
 
-    layout: TextLayout
+    layout: Any
     trajectory: Trajectory
     gcode: str
     missing: List[str] = field(default_factory=list)
     #: 生成时的机器配置（用于估算耗时）
     machine: Optional[MachineConfig] = None
+    #: 表格任务时的表格排版结果
+    table: Any = None
 
     @property
     def stroke_count(self) -> int:
@@ -110,6 +112,55 @@ def build_job(request: WriteRequest) -> WriteJob:
         gcode=gcode,
         missing=missing,
         machine=request.machine,
+    )
+
+
+def build_table_job(
+    spec,
+    repository: GlyphRepository,
+    machine: MachineConfig,
+    *,
+    font_size: float = 20.0,
+    margin: float = 10.0,
+    line_height: float = 1.4,
+    letter_spacing: float = 0.05,
+    corner_radius: float = 0.6,
+    sample_step: float = 0.5,
+    smooth: bool = True,
+) -> WriteJob:
+    """把一个表格排版并转换成轨迹与 G-code。"""
+    from .table import layout_table
+
+    table_layout = layout_table(
+        spec,
+        repository,
+        paper_width=machine.width,
+        paper_height=machine.height,
+        font_size=font_size,
+        margin=margin,
+        line_height=line_height,
+        letter_spacing=letter_spacing,
+    )
+
+    strokes = table_layout.text_strokes
+    trajectory = plan_trajectory(
+        strokes,
+        geometry=table_layout.borders,
+        corner_radius=corner_radius,
+        sample_step=sample_step,
+        smooth=smooth,
+    )
+
+    generator = GCodeGenerator(machine)
+    gcode = generator.generate(trajectory)
+
+    return WriteJob(
+        layout=table_layout,
+        trajectory=trajectory,
+        gcode=gcode,
+        missing=[],
+        machine=machine,
+        table=table_layout,
     )
 
 

@@ -145,6 +145,7 @@ def _round_corners(
 def plan_trajectory(
     strokes: Sequence[Tuple[str, int, Polyline]],
     *,
+    geometry: Optional[Sequence[Polyline]] = None,
     corner_radius: float = 0.6,
     sample_step: float = 0.5,
     smooth: bool = True,
@@ -157,6 +158,10 @@ def plan_trajectory(
     ----
     strokes:
         序列，每项为 ``(字符, 笔画序号, 点序列)``，点序列为纸张坐标 (mm)。
+    geometry:
+        额外的几何线条（表格框线、图形轮廓等）。它们**不**做平滑、圆角和
+        重采样 —— 直线经过 Catmull-Rom 会在拐角处剧烈过冲，把矩形甩成
+        圆角团块。这些线条会先于文字绘制，笔尖不用抬起就能画完整个框。
     corner_radius:
         笔画内部拐角的圆滑半径 (mm)。设为 0 则保留尖角。
     sample_step:
@@ -168,6 +173,29 @@ def plan_trajectory(
     """
     trajectory = Trajectory()
     current: Optional[Point] = None
+
+    # 几何线条先画（原始直线，不做任何平滑处理）
+    for line in geometry or []:
+        if len(line) < 2:
+            continue
+        start = line[0]
+        if current is not None and math.dist(current, start) > min_travel:
+            travel_start = current
+            trajectory.actions.append(
+                Action(
+                    type=ActionType.TRAVEL,
+                    points=[travel_start, start],
+                    char="",
+                    stroke_index=0,
+                )
+            )
+            trajectory.travel_length += math.dist(travel_start, start)
+            trajectory.pen_toggles += 1
+        trajectory.actions.append(
+            Action(type=ActionType.DRAW, points=list(line), char="", stroke_index=0)
+        )
+        trajectory.draw_length += polyline_length(line)
+        current = line[-1]
 
     for char, stroke_index, raw_points in strokes:
         if len(raw_points) < 2:

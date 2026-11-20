@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from . import __version__
+from .glyphs import GlyphRepository
 from .layout import LayoutOptions
 from .machine import MachineConfig, PenConfig
 from .pipeline import WriteRequest, build_job, render_preview
@@ -277,6 +278,118 @@ def _menu_run(args: argparse.Namespace) -> None:
     cmd_run(ns)
 
 
+def cmd_table(args: argparse.Namespace) -> int:
+    """把表格写出来：表格线 + 单元格文字。"""
+    from .pipeline import build_table_job
+    from .table import TableSpec
+
+    rows = _read_table_rows(args)
+    if rows is None:
+        return 2
+
+    machine = _machine_from_args(args)
+    repository = GlyphRepository.default(
+        cache_dir=Path(args.cache_dir) if args.cache_dir else None,
+        offline=args.offline,
+    )
+
+    spec = TableSpec(
+        rows=rows,
+        padding=args.padding,
+        align=args.align,
+        valign=args.valign,
+        draw_borders=not args.no_borders,
+    )
+
+    job = build_table_job(
+        spec,
+        repository,
+        machine,
+        font_size=args.font_size,
+        margin=args.margin,
+        line_height=args.line_height,
+        letter_spacing=args.letter_spacing,
+        corner_radius=args.corner_radius,
+        sample_step=args.sample_step,
+        smooth=not args.no_smooth,
+    )
+
+    sim_options = SimulationOptions(
+        show_travel=not args.no_travel,
+        # 表格默认不显示笔顺编号，否则数字会压在文字上
+        show_stroke_numbers=args.stroke_numbers,
+        real_time=not args.demo,
+        demo_speed=args.speed,
+        canvas_width=args.canvas_width,
+        show_final=not args.animate,
+    )
+
+    if args.format == "svg":
+        content = render_preview(job, sim_options, as_html=False)
+        suffix = ".svg"
+    else:
+        content = render_preview(job, sim_options, as_html=True)
+        suffix = ".html"
+
+    out = Path(args.output) if args.output else Path("out") / f"table{suffix}"
+    out = _write_output(out, content)
+
+    print(f"表格: {len(rows)} 行 x {len(rows[0])} 列")
+    if args.format == "svg":
+        print(f"已生成: {out.resolve()}")
+    else:
+        print(f"预览已生成: {out.resolve()}")
+        if args.open:
+            if _open_in_browser(out):
+                print("已在浏览器中打开")
+            else:
+                print("（未能自动打开浏览器，请手动双击该文件）")
+
+    t = job.trajectory
+    print(f"笔画数     : {t.stroke_count}")
+    print(f"抬落笔次数 : {t.pen_toggles}")
+    print(f"绘制长度   : {t.draw_length:.1f} mm")
+    print(f"空走长度   : {t.travel_length:.1f} mm")
+    print(f"实际字号   : {job.table.font_size:.2f} mm")
+    print(f"预计耗时   : {job.estimated_seconds:.1f} s")
+    return 0
+
+
+def _read_table_rows(args: argparse.Namespace) -> Optional[List[List[str]]]:
+    """读取表格数据：--file 指定 JSON，或用位置参数按行给文本。"""
+    import json
+
+    if args.file:
+        path = Path(args.file)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"✗ 读取表格文件失败: {exc}", file=sys.stderr)
+            return None
+        if isinstance(data, list) and data and isinstance(data[0], list):
+            rows = [[str(c) for c in row] for row in data]
+        elif isinstance(data, list):
+            rows = [[str(c)] for c in data]
+        else:
+            print("✗ 表格文件应为二维数组或一维数组", file=sys.stderr)
+            return None
+    else:
+        if not args.text:
+            print("✗ 请用 --file 指定表格 JSON，或用位置参数给出每行文本", file=sys.stderr)
+            return None
+        rows = []
+        for line in args.text:
+            rows.append([c for c in line.split("|")])
+        # 每行用 | 分隔单元格；行数不一致时按最长的补空
+        width = max(len(r) for r in rows)
+        rows = [r + [""] * (width - len(r)) for r in rows]
+
+    if not rows:
+        print("✗ 表格为空", file=sys.stderr)
+        return None
+    return rows
+
+
 def cmd_preview(args: argparse.Namespace) -> int:
     machine = _machine_from_args(args)
     request = _build_request(args, machine)
@@ -436,6 +549,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"write-robot {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # table
+    tb = sub.add_parser("table", help="把表格写出来（表格线 + 单元格文字）")
+    tb.add_argument("text", nargs="*", help="每行文本，单元格之间用 | 分隔")
+    tb.add_argument("--file", default=None, help="表格数据 JSON 文件（二维数组）")
+    tb.add_argument("-o", "--output", default=None, help="输出文件")
+    tb.add_argument("--format", choices=("html", "svg"), default="html", help="输出格式")
+    tb.add_argument("--padding", type=float, default=3.0, help="单元格内边距（mm）")
+    tb.add_argument("--no-borders", action="store_true", help="不绘制表格线")
+    tb.add_argument("--animate", action="store_true", help="打开页面从空白开始播放动画（默认直接显示结果）")
+    tb.add_argument("--demo", action="store_true", help="演示模式（加速播放）")
+    tb.add_argument("--speed", type=float, default=4.0, help="演示速度倍率")
+    tb.add_argument("--no-travel", action="store_true", help="不显示空走轨迹")
+    tb.add_argument("--stroke-numbers", action="store_true", help="显示笔顺编号（默认不显示）")
+    tb.add_argument("--canvas-width", type=int, default=800, help="画布宽度（像素）")
+    tb.add_argument("--open", action="store_true", help="生成后用浏览器打开预览")
+    tb.add_argument("--corner-radius", type=float, default=0.6, help="拐角圆滑半径（mm）")
+    tb.add_argument("--sample-step", type=float, default=0.5, help="弧长重采样步长（mm）")
+    tb.add_argument("--no-smooth", action="store_true", help="不做样条平滑")
+    tb.add_argument("--cache-dir", default=None, help="汉字数据缓存目录")
+    tb.add_argument("--offline", action="store_true", help="离线模式，只用本地缓存")
+    _add_layout_args(tb)
+    _add_machine_args(tb)
+    tb.set_defaults(func=cmd_table)
 
     # menu
     m = sub.add_parser("menu", help="交互菜单（双击 wr.bat 时进入）")

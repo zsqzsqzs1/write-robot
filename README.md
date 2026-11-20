@@ -35,7 +35,7 @@
 | **CoreXY 支持** | 固件解算与上位机解算两种路径都支持，公式与 GRBL `planner.c` 中的 `COREXY` 分支一致 |
 | **抬落笔可配** | Z 轴升降（`G0 Z`）或 RC 舵机（`M3 S`），对应 `grbl-servo` 固件的 PWM 语义 |
 | **纯 Python** | 核心功能零依赖；只有串口下发需要 `pyserial` |
-| **可复现** | 55 项单元测试覆盖几何、排版、轨迹、G-code 与模拟器 |
+| **可复现** | 66 项单元测试覆盖几何、排版、表格、轨迹、G-code 与模拟器 |
 
 ---
 
@@ -94,6 +94,29 @@ job = build_job(WriteRequest(text="你好世界", machine=machine))
 open("preview.html", "w", encoding="utf-8").write(render_preview(job))
 ```
 
+### 写表格
+
+```bash
+writerobot table --file rows.json -o out/table.html --width 240 --height 180
+```
+
+`rows.json` 是一个二维数组：
+
+```json
+[["我是一名小学生", "我是一名中学生"],
+ ["我是一名高中生", "我是一名大学生"],
+ ["我是工人", "我是老师"]]
+```
+
+也可以直接在命令行用 `|` 分隔单元格：
+
+```bash
+writerobot table "我是一名小学生|我是一名中学生" "我是工人|我是老师"
+```
+
+表格线会先画完，再逐格写字 —— 和真实写字机器人一样。
+字号与内边距都会自动缩放以适应书写区域。
+
 ### 生成的文件在哪
 
 所有产物统一输出到项目目录下的 **`out/`**：
@@ -104,6 +127,7 @@ open("preview.html", "w", encoding="utf-8").write(render_preview(job))
 | `out/output.nc` | G-code 文件（可导入 GRBL 发送器） | `gcode` / 菜单选 2 |
 | `out/greeting.html` | 示例脚本生成的预览 | `python examples/write_greeting.py` |
 | `out/greeting.nc` | 示例脚本生成的 G-code | 同上 |
+| `out/table.html` | 表格轨迹预览 | `table` / 菜单选 1 |
 
 用 `-o` 可以指定任意路径，程序会自动创建缺失的目录：
 
@@ -150,6 +174,7 @@ writerobot run "你好世界" --port COM3 --machine examples/machine_corexy_serv
 
 ```
 writerobot menu              交互菜单（双击 wr.bat 时进入）
+writerobot table             把表格写出来（表格线 + 单元格文字）
 writerobot preview <文字>    生成轨迹预览（HTML 动画 / SVG），无需硬件
 writerobot gcode   <文字>    生成 G-code 文件
 writerobot run     <文字>    连接机器并直接书写
@@ -327,6 +352,14 @@ const [b, $] = [{x: 0, y: -124}, {x: 1024, y: 900}]
 可以有效抑制过冲与尖点。参考 Yuksel et al., *On the Parameterization of
 Catmull-Rom Curves* (2011)。`tests/test_geometry.py` 里有对应的回归测试。
 
+### 表格线为什么不走平滑管线
+
+表格框线是**几何直线**，不能当文字笔画处理。Catmull-Rom 经过矩形的四个角点时
+会剧烈过冲，把直角甩成一个巨大的圆角团块（实测过）。
+
+因此 `plan_trajectory` 增加了独立的 `geometry` 参数：几何线条原样绘制，
+不经过平滑、圆角和重采样，并且总是先于文字绘制。
+
 ### 轨迹规划流程
 
 ```
@@ -355,6 +388,7 @@ Catmull-Rom Curves* (2011)。`tests/test_geometry.py` 里有对应的回归测�
 write-robot/
 ├── writerobot/
 │   ├── geometry.py     几何工具：向心 Catmull-Rom、重采样、抽稀、包围盒
+│   ├── table.py        表格排版：列宽行高计算、表格线、文字嵌入单元格
 │   ├── fonts.py        内置单线拉丁字体（原创，A-Z / 0-9 / 标点）
 │   ├── glyphs.py       字形来源：汉字笔画数据 + 拉丁字体，带磁盘缓存
 │   ├── layout.py       排版：em 盒模型、多行、自动换行、自动缩放、对齐
@@ -366,7 +400,7 @@ write-robot/
 │   ├── pipeline.py     高层流水线
 │   └── cli.py          命令行入口
 ├── wr.bat              Windows 一键启动脚本
-├── tests/              55 项单元测试
+├── tests/              66 项单元测试
 ├── examples/           示例配置与示例脚本
 └── docs/
 ```

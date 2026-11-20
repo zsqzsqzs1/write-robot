@@ -36,7 +36,7 @@ class SimulationOptions:
     show_stroke_numbers: bool = True
 
     #: 线条宽度 (mm)
-    stroke_width: float = 0.6
+    stroke_width: float = 0.8
 
     #: 背景色
     background: str = "#ffffff"
@@ -55,6 +55,10 @@ class SimulationOptions:
 
     #: 演示速度倍率（real_time=False 时生效）
     demo_speed: float = 4.0
+
+    #: 打开页面时是否直接显示最终结果（而不是空白画布）。
+    #: 播放按钮会从起点重新回放书写过程。
+    show_final: bool = True
 
 
 def _path_data(points: Sequence[Tuple[float, float]], to_px) -> str:
@@ -180,6 +184,7 @@ def render_html(
         "segments": segments,
         "duration": play_duration,
         "realTime": opts.real_time,
+        "showFinal": opts.show_final,
         "canvasWidth": opts.canvas_width,
         "canvasHeight": round(canvas_h, 2),
         "margin": opts.margin * scale,
@@ -345,24 +350,31 @@ const starts = DATA.segments.map(s => { const t = total; total += s.dur; return 
 
 function seek(t) {
   let penX = DATA.margin, penY = DATA.margin + DATA.paperHeight;
-  let trail = '';
+  let trail = [];
   for (let i = 0; i < paths.length; i++) {
     const { el, len, seg } = paths[i];
     const s0 = starts[i], s1 = s0 + seg.dur;
     const local = Math.max(0, Math.min(1, (t - s0) / (seg.dur || 1)));
     if (seg.type === 'draw') {
       el.setAttribute('stroke-dashoffset', len * (1 - local));
-      const pt = el.getPointAtLength(len * local);
-      penX = pt.x; penY = pt.y;
-      if (t > s0) trail += (trail ? ' ' : '') + `L ${pt.x.toFixed(2)} ${pt.y.toFixed(2)}`;
-    } else {
-      const pt = el.getPointAtLength(len * local);
-      penX = pt.x; penY = pt.y;
-      if (t > s0) trail += (trail ? ' ' : '') + `L ${pt.x.toFixed(2)} ${pt.y.toFixed(2)}`;
     }
+    const pt = el.getPointAtLength(len * local);
+    penX = pt.x; penY = pt.y;
+    if (t > s0) trail.push([pt.x, pt.y]);
   }
   pen.setAttribute('cx', penX); pen.setAttribute('cy', penY);
-  penTrail.setAttribute('d', trail ? trail.replace(/^L/, 'M') : '');
+
+  // 只保留最近一小段轨迹，避免大量空走线把整张图糊住；
+  // 动画结束后完全隐藏轨迹，露出干净的最终结果。
+  const finished = t >= total - 0.001;
+  if (finished || trail.length < 2) {
+    penTrail.setAttribute('d', '');
+  } else {
+    const tail = trail.slice(-40);
+    penTrail.setAttribute('d',
+      'M ' + tail.map(p => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join(' L '));
+  }
+
   document.getElementById('clock').textContent = t.toFixed(1) + 's';
   document.getElementById('seek').value = String(Math.round(t / (total || 1) * 1000));
   updateStat(t);
@@ -415,6 +427,11 @@ document.getElementById('seek').addEventListener('input', e => {
 });
 
 seek(0);
+if (DATA.showFinal) {
+  // 直接显示最终结果；播放按钮会从起点重新回放书写过程
+  seek(total);
+  document.getElementById('play').textContent = '重新播放';
+}
 </script>
 </body>
 </html>
